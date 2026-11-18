@@ -104,6 +104,15 @@ def find_default_history():
                 return candidate
     return None
 
+
+@st.cache_data
+def load_default_history():
+    path = find_default_history()
+    if path is None:
+        return pd.DataFrame(columns=["date", "mean_temp", "min_temp", "max_temp"])
+    frame = pd.read_csv(path, parse_dates=["date"])
+    return frame.sort_values("date").reset_index(drop=True)
+
 st.set_page_config(page_title="London Temperature Lab", page_icon="🌡️", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
@@ -137,6 +146,7 @@ def load_data():
 
 
 pred, comparison, folds, summary = load_data()
+history_data = load_default_history()
 models = [name for name, col in PREDICTION_COLUMNS.items() if col in pred.columns]
 best = comparison.sort_values("MAE (°C)").iloc[0]
 date_min, date_max = pred.date.min().date(), pred.date.max().date()
@@ -153,14 +163,29 @@ with st.sidebar:
 st.markdown('<div class="hero"><div class="eyebrow">London · 51.5072°N, 0.1276°W</div><h1>Temperature prediction dashboard</h1><p class="small-muted">A closer look at historical weather patterns and time-series model performance.</p></div>', unsafe_allow_html=True)
 
 if section == "Overview":
-    st.markdown('<div class="note">This overview reports the notebook’s saved historical test-set predictions. Use Future estimate for a separate model-generated estimate beyond the available history. Historical scores below remain the supplied CSV results.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="note">The overview now uses the complete 2010–2025 daily history. Model scores and actual-versus-predicted results below remain the notebook’s original held-out test-set outputs.</div>', unsafe_allow_html=True)
     st.write("")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Test-set days", f"{len(pred):,}")
-    c2.metric("Best test MAE", f"{best['MAE (°C)']:.3f} °C", str(best["Model"]))
-    c3.metric("Best model R²", f"{best['R2 Score']:.3f}")
-    c4.metric("Test period", f"{pred.date.dt.year.min()}–{pred.date.dt.year.max()}")
-    st.subheader("Actual and predicted temperatures")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    if not history_data.empty:
+        c1.metric("Historical daily records", f"{len(history_data):,}")
+        mean_history_temp = float(history_data["mean_temp"].mean())
+        c2.metric("Full-history mean", f"{mean_history_temp:.2f} °C")
+        c5.metric("Historical period", f"{history_data.date.min():%Y}–{history_data.date.max():%Y}")
+    else:
+        c1.metric("Historical daily records", "Unavailable")
+        c2.metric("Full-history mean", "Unavailable")
+        c5.metric("Historical period", "Unavailable")
+        mean_history_temp = None
+    c3.metric("Best test MAE", f"{best['MAE (°C)']:.3f} °C", str(best["Model"]))
+    c4.metric("Best model R²", f"{best['R2 Score']:.3f}")
+    if mean_history_temp is not None:
+        st.subheader("Daily mean temperature · full dataset")
+        history_fig = px.line(history_data, x="date", y="mean_temp", labels={"date": "", "mean_temp": "Mean temperature (°C)"})
+        history_fig.update_traces(line_color="#7dd3fc", line_width=1)
+        history_fig.update_layout(height=390, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=20,r=20,t=20,b=20))
+        st.plotly_chart(history_fig, use_container_width=True)
+        st.caption(f"All {len(history_data):,} daily observations from {history_data.date.min():%d %b %Y} through {history_data.date.max():%d %b %Y}.")
+    st.subheader("Actual and predicted temperatures · test set")
     selected = st.selectbox("Prediction model", models, index=models.index("Linear Regression") if "Linear Regression" in models else 0)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=pred.date, y=pred.actual_temperature, name="Actual", line=dict(color="#e2e8f0", width=1.5)))

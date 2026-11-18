@@ -14,7 +14,7 @@ from sklearn.tree import DecisionTreeRegressor
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data" if (ROOT / "data" / "ML_73_temperature_predictions.csv").exists() else ROOT
-RAW_DATA_NAME = "london_temperature_2010_2025.csv"
+RAW_DATA_NAMES = ("london_temperature_history_updated.csv", "london_temperature_2010_2025.csv")
 COLORS = {"Linear Regression": "#60a5fa", "Random Forest": "#a78bfa", "Decision Tree": "#fbbf24", "Seasonal Naive": "#94a3b8"}
 PREDICTION_COLUMNS = {
     "Linear Regression": "linear_regression",
@@ -93,6 +93,16 @@ def forecast_to_date(history, target_date, model_name, fitted_models):
         series.loc[forecast_date] = prediction
     forecast_path = series.loc[series.index > last_observed].rename("Predicted temperature").reset_index()
     return float(series.loc[target_date]), last_observed.date(), forecast_path
+
+
+def find_default_history():
+    candidates = [ROOT / "data", ROOT]
+    for filename in RAW_DATA_NAMES:
+        for folder in candidates:
+            candidate = folder / filename
+            if candidate.exists():
+                return candidate
+    return None
 
 st.set_page_config(page_title="London Temperature Lab", page_icon="🌡️", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
@@ -203,7 +213,7 @@ elif section == "Prediction lookup":
 elif section == "Future estimate":
     st.subheader("Estimate a future temperature")
     st.markdown('<div class="note">Choose a past or future date and a model. Past dates use a one-day backtest trained on data available before that date. Future dates are predicted one day at a time using earlier estimates as lag features.</div>', unsafe_allow_html=True)
-    default_history_path = next((p for p in [DATA / RAW_DATA_NAME, ROOT / "data" / RAW_DATA_NAME, ROOT / RAW_DATA_NAME] if p.exists()), None)
+    default_history_path = find_default_history()
     uploaded_history = st.file_uploader("Optional: upload an updated daily history CSV", type=["csv"], help="Required columns: date and mean_temp. Include at least 365 consecutive daily observations; min_temp and max_temp are optional.")
     history = None
     try:
@@ -214,7 +224,7 @@ elif section == "Future estimate":
             history = pd.read_csv(default_history_path)
             history_source = default_history_path.name
         if history is None:
-            st.warning(f"Upload a daily temperature CSV to enable forecasting. The expected file name is {RAW_DATA_NAME}; it should include date and mean_temp columns.")
+            st.warning(f"No bundled history file was found. Upload a daily temperature CSV with date and mean_temp columns. Expected default: {RAW_DATA_NAMES[0]}.")
         else:
             if "date" not in history.columns and "time" in history.columns:
                 history = history.rename(columns={"time": "date"})
@@ -356,7 +366,7 @@ elif section == "Dataset explorer":
     st.metric("Rows shown",f"{len(view):,}")
     st.dataframe(view,use_container_width=True,hide_index=True)
     st.download_button("Download filtered rows",view.to_csv(index=False).encode("utf-8"),"london_temperature_test_predictions.csv","text/csv")
-    raw_path = next((p for p in [DATA / RAW_DATA_NAME, ROOT / "data" / RAW_DATA_NAME, ROOT / RAW_DATA_NAME] if p.exists()), None)
+    raw_path = find_default_history()
     if raw_path is not None:
         st.subheader("Full daily history")
         raw = pd.read_csv(raw_path, parse_dates=["date"])

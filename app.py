@@ -7,7 +7,7 @@ import streamlit as st
 
 
 ROOT = Path(__file__).parent
-DATA = ROOT 
+DATA = ROOT / "data" if (ROOT / "data" / "ML_73_temperature_predictions.csv").exists() else ROOT
 COLORS = {"Linear Regression": "#60a5fa", "Random Forest": "#a78bfa", "Decision Tree": "#fbbf24", "Seasonal Naive": "#94a3b8"}
 PREDICTION_COLUMNS = {
     "Linear Regression": "linear_regression",
@@ -60,7 +60,7 @@ date_min, date_max = pred.date.min().date(), pred.date.max().date()
 with st.sidebar:
     st.markdown("## 🌡️ London Temperature Lab")
     st.caption("ML project · ML_73 · 5CIUP521")
-    section = st.radio("Explore", ["Overview", "Temperature trends", "Model performance", "Walk-forward validation", "Dataset explorer"], label_visibility="collapsed")
+    section = st.radio("Explore", ["Overview", "Prediction lookup", "Temperature trends", "Model performance", "Walk-forward validation", "Dataset explorer"], label_visibility="collapsed")
     st.divider()
     st.markdown("**Prediction period**")
     st.caption(f"{date_min:%d %b %Y} — {date_max:%d %b %Y}")
@@ -98,6 +98,33 @@ if section == "Overview":
         chart.update_layout(template="plotly_dark", height=330, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10,r=10,t=20,b=10))
         st.plotly_chart(chart, use_container_width=True)
         st.caption("Computed from the notebook’s full 2010–2025 dataset.")
+
+elif section == "Prediction lookup":
+    st.subheader("Look up a saved prediction")
+    st.markdown('<div class="note">Choose a date from the historical test set and a model to see the prediction saved by your notebook. This lookup does not generate a new or future forecast.</div>', unsafe_allow_html=True)
+    st.write("")
+    a, b = st.columns(2)
+    with a:
+        chosen_date = st.date_input("Select a test-set date", value=date_min, min_value=date_min, max_value=date_max)
+    with b:
+        chosen_model = st.selectbox("Choose a model", models, index=models.index("Linear Regression") if "Linear Regression" in models else 0, key="lookup_model")
+    match = pred.loc[pred.date.dt.date == chosen_date]
+    if match.empty:
+        st.warning("No saved prediction exists for that date.")
+    else:
+        row = match.iloc[0]
+        prediction = float(row[PREDICTION_COLUMNS[chosen_model]])
+        actual = float(row["actual_temperature"])
+        error = prediction - actual
+        st.markdown(f"### {chosen_date:%A, %d %B %Y}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Model prediction", f"{prediction:.2f} °C", chosen_model)
+        c2.metric("Recorded temperature", f"{actual:.2f} °C")
+        c3.metric("Absolute error", f"{abs(error):.2f} °C", f"{'+' if error >= 0 else '−'}{error:.2f} °C prediction error")
+        st.subheader("All saved model outputs for this date")
+        view = pd.DataFrame({"Model": models, "Prediction (°C)": [float(row[PREDICTION_COLUMNS[m]]) for m in models]})
+        st.dataframe(view.style.format({"Prediction (°C)": "{:.3f}"}), use_container_width=True, hide_index=True)
+        st.caption("The actual and predicted values are read from the supplied historical test-set CSV. Available dates: 1 Jan 2023 to 31 Dec 2025.")
 
 elif section == "Temperature trends":
     st.subheader("Historical patterns")

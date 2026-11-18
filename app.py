@@ -202,7 +202,7 @@ elif section == "Prediction lookup":
 
 elif section == "Future estimate":
     st.subheader("Estimate a future temperature")
-    st.markdown('<div class="note">Choose a target date and a model. The app uses the uploaded historical temperatures, then predicts forward one day at a time using its own earlier estimates as lag features.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="note">Choose a past or future date and a model. Past dates use a one-day backtest trained on data available before that date. Future dates are predicted one day at a time using earlier estimates as lag features.</div>', unsafe_allow_html=True)
     default_history_path = next((p for p in [DATA / RAW_DATA_NAME, ROOT / "data" / RAW_DATA_NAME, ROOT / RAW_DATA_NAME] if p.exists()), None)
     uploaded_history = st.file_uploader("Optional: upload an updated daily history CSV", type=["csv"], help="Required columns: date and mean_temp. Include at least 365 consecutive daily observations; min_temp and max_temp are optional.")
     history = None
@@ -235,36 +235,62 @@ elif section == "Future estimate":
                     latest = history.date.max().date()
                     age_days = (pd.Timestamp.today().date() - latest).days
                     if age_days > 30:
-                        st.warning(f"This history ends on {latest:%d %b %Y}, which is {age_days} days ago. Forecasts begin from that last observed date, so update the CSV for more relevant estimates.")
+                        st.warning(f"This history ends on {latest:%d %b %Y}, which is {age_days} days ago. Future estimates start from that last observation; historical backtests use only earlier rows.")
                     st.caption(f"Using {len(history):,} daily records · {history_source} · last observation {latest:%d %b %Y}")
-                    lower_date = max(latest + timedelta(days=1), pd.Timestamp.today().date() + timedelta(days=1))
-                    max_date = latest + timedelta(days=365)
-                    if lower_date > max_date:
-                        st.info("The history is too old for a forward estimate. Upload updated daily observations so the forecast date is within one year of the latest observation.")
-                    else:
-                        target_date = st.date_input("Future date", value=lower_date, min_value=lower_date, max_value=max_date)
-                        model_name = st.selectbox("Forecast model", ["Linear Regression", "Random Forest", "Decision Tree", "Seasonal Naive"])
+                    target_date = st.date_input("Target date (past or future)", value=pd.Timestamp.today().date() + timedelta(days=1))
+                    model_name = st.selectbox("Forecast model", ["Linear Regression", "Random Forest", "Decision Tree", "Seasonal Naive"])
+                    target_timestamp = pd.Timestamp(target_date)
+                    is_historical = target_timestamp <= history.date.max()
+                    if not is_historical:
                         horizon = (target_date - latest).days
                         if horizon > 30:
-                            st.warning(f"This is a {horizon}-day estimate from the last observation. Recursive forecast errors can compound, especially over longer horizons.")
-                        if st.button("Estimate temperature", type="primary"):
-                            try:
-                                fitted = train_forecast_models(history) if model_name != "Seasonal Naive" else {}
-                                estimate, last_observed, path = forecast_to_date(history, target_date, model_name, fitted)
-                                st.markdown(f"### Estimate for {target_date:%A, %d %B %Y}")
+                            st.warning(f"This estimate is {horizon} days beyond the last observation. Recursive errors can compound as the horizon grows.")
+                        if horizon > 3650:
+                            st.error("For app responsiveness, future estimates are limited to 10 years beyond the last observation.")
+                    if st.button("Estimate temperature", type="primary"):
+                        try:
+                            if is_historical:
+                                training_history = history.loc[history.date < target_timestamp].copy()
+                                if len(training_history) < 730:
+                                    earliest_supported = (history.date.min() + pd.Timedelta(days=730)).date()
+                                    st.error(f"This model needs at least two years of earlier daily data. The earliest supported date for this file is {earliest_supported:%d %b %Y}.")
+                                    st.stop()
+                                mode_label = "Historical one-day backtest"
+                            else:
+                                training_history = history
+                                mode_label = "Future estimate"
+                                if horizon > 3650:
+                                    st.stop()
+                            fitted = train_forecast_models(training_history) if model_name != "Seasonal Naive" else {}
+                            estimate, last_observed, path = forecast_to_date(training_history, target_date, model_name, fitted)
+                            st.markdown(f"### Estimate for {target_date:%A, %d %B %Y}")
+                            st.caption(f"{mode_label} · {model_name}")
+                            if is_historical:
+                                actual_rows = history.loc[history.date == target_timestamp, "mean_temp"]
+                                actual = float(actual_rows.iloc[0]) if not actual_rows.empty else None
+                                x1, x2, x3 = st.columns(3)
+                                x1.metric("Model estimate", f"{estimate:.2f} °C")
+                                if actual is not None:
+                                    x2.metric("Recorded temperature", f"{actual:.2f} °C")
+                                    x3.metric("Absolute error", f"{abs(estimate - actual):.2f} °C")
+                                else:
+                                    x2.metric("Training data through", f"{last_observed:%d %b %Y}")
+                            else:
                                 x1, x2, x3 = st.columns(3)
                                 x1.metric("Estimated mean temperature", f"{estimate:.2f} °C", model_name)
                                 x2.metric("Forecast horizon", f"{horizon} day{'s' if horizon != 1 else ''}")
                                 x3.metric("Last observed date", f"{last_observed:%d %b %Y}")
-                                fig = go.Figure()
-                                observed_tail = history.tail(90)
-                                fig.add_trace(go.Scatter(x=observed_tail.date, y=observed_tail.mean_temp, name="Observed history", line=dict(color="#e2e8f0", width=1.5)))
-                                fig.add_trace(go.Scatter(x=path["date"], y=path["Predicted temperature"], name="Recursive estimates", line=dict(color=COLORS.get(model_name, "#94a3b8"), width=1.5, dash="dash")))
-                                fig.update_layout(height=400, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Mean temperature (°C)", xaxis_title="", margin=dict(l=20,r=20,t=20,b=20))
-                                st.plotly_chart(fig, use_container_width=True)
-                                st.caption("This is an ML estimate based only on date and historical temperature patterns. It is not a live weather forecast and does not account for atmospheric conditions.")
-                            except Exception as exc:
-                                st.error(f"Could not create the estimate: {exc}")
+                            fig = go.Figure()
+                            observed_tail = training_history.tail(90)
+                            fig.add_trace(go.Scatter(x=observed_tail.date, y=observed_tail.mean_temp, name="Observed history", line=dict(color="#e2e8f0", width=1.5)))
+                            fig.add_trace(go.Scatter(x=path["date"], y=path["Predicted temperature"], name="Estimated temperature", line=dict(color=COLORS.get(model_name, "#94a3b8"), width=1.5, dash="dash")))
+                            if is_historical and actual is not None:
+                                fig.add_trace(go.Scatter(x=[target_timestamp], y=[actual], name="Recorded temperature", mode="markers", marker=dict(color="#50d5a2", size=9)))
+                            fig.update_layout(height=400, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Mean temperature (°C)", xaxis_title="", margin=dict(l=20,r=20,t=20,b=20))
+                            st.plotly_chart(fig, use_container_width=True)
+                            st.caption("Historical dates use a one-day backtest trained only on earlier observations. Future dates are predicted recursively from the last observation. Neither mode uses atmospheric conditions, so results are estimates rather than weather forecasts.")
+                        except Exception as exc:
+                            st.error(f"Could not create the estimate: {exc}")
     except Exception as exc:
         st.error(f"Could not read the temperature history: {exc}")
 

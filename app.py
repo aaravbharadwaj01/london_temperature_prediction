@@ -105,7 +105,6 @@ def find_default_history():
     return None
 
 
-@st.cache_data
 def load_default_history():
     path = find_default_history()
     if path is None:

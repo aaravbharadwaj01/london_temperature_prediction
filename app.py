@@ -7,7 +7,7 @@ import streamlit as st
 
 
 ROOT = Path(__file__).parent
-DATA = ROOT / "data"
+DATA = ROOT 
 COLORS = {"Linear Regression": "#60a5fa", "Random Forest": "#a78bfa", "Decision Tree": "#fbbf24", "Seasonal Naive": "#94a3b8"}
 PREDICTION_COLUMNS = {
     "Linear Regression": "linear_regression",

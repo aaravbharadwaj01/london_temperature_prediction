@@ -14,7 +14,7 @@ from sklearn.tree import DecisionTreeRegressor
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data" if (ROOT / "data" / "ML_73_temperature_predictions.csv").exists() else ROOT
-RAW_DATA_NAMES = ("london_temperature_history_updated.csv", "london_temperature_2010_2025.csv")
+RAW_DATA_NAMES = ("london_temperature_2010_2025.csv",)
 COLORS = {"Linear Regression": "#60a5fa", "Random Forest": "#a78bfa", "Decision Tree": "#fbbf24", "Seasonal Naive": "#94a3b8"}
 PREDICTION_COLUMNS = {
     "Linear Regression": "linear_regression",
